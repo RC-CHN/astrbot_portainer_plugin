@@ -1,0 +1,5 @@
+name: astrbot_portainer_plugin 
+desc: 对portainer进行简单的查看及管理操作。 # 插件简短描述
+version: v0.9 
+author: RC-CHN # 作者
+repo: https://github.com/Soulter/helloworld # 插件的仓库地址

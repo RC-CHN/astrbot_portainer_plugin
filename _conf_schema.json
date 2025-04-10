@@ -1,0 +1,31 @@
+{
+    "portainer": {
+        "description": "Portainer连接配置",
+        "type": "object",
+        "items": {
+            "url": {
+                "description": "Portainer服务器URL",
+                "type": "string",
+                "hint": "例如: http://portainer.example.com"
+            },
+            "username": {
+                "description": "登录用户名",
+                "type": "string"
+            },
+            "password": {
+                "description": "登录密码",
+                "type": "string"
+            },
+            "verify_ssl": {
+                "description": "验证SSL证书",
+                "type": "bool",
+                "default": true
+            },
+            "token_cache_ttl": {
+                "description": "Token缓存时间(秒)",
+                "type": "int",
+                "default": 3600
+            }
+        }
+    }
+}
