@@ -6,7 +6,7 @@ import aiohttp
 import time
 import json
 
-@register("astrbot_portainer_plugin", "RC", "简单查看portainer的情况", "0.9")
+@register("astrbot_portainer_plugin", "RC", "简单查看portainer的情况", "1.0")
 class MyPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -40,6 +40,32 @@ class MyPlugin(Star):
         except Exception as e:
             yield event.plain_result(f"Portainer连接测试失败：{str(e)}")
 
+    def _detect_encoding(self, data):
+        """简单的编码检测实现"""
+        # 检查UTF-8 BOM
+        if len(data) >= 3 and data[:3] == b'\xef\xbb\xbf':
+            return 'utf-8-sig'
+        
+        # 检查UTF-16/UTF-32 BOM
+        if len(data) >= 2:
+            if data[:2] == b'\xff\xfe':
+                return 'utf-16'
+            if data[:2] == b'\xfe\xff':
+                return 'utf-16-be'
+        
+        # 启发式检测中文编码
+        try:
+            # 尝试GB18030解码，统计有效中文字符
+            decoded = data.decode('gb18030', errors='strict')
+            chinese_chars = sum(1 for c in decoded if '\u4e00' <= c <= '\u9fff')
+            if chinese_chars > len(decoded) * 0.1:  # 中文字符占比超过10%
+                return 'gb18030'
+        except:
+            pass
+        
+        # 默认返回UTF-8
+        return 'utf-8'
+
     @filter.llm_tool(name="get_container_logs")
     async def get_container_logs(
         self, 
@@ -71,7 +97,34 @@ class MyPlugin(Star):
             
             async with self.session.get(url, params=params, ssl=self.verify_ssl) as resp:
                 if resp.status == 200:
-                    return await resp.text()
+                    data = await resp.read()
+                    
+                    # 使用自定义编码检测
+                    encoding = self._detect_encoding(data)
+                    
+                    # 尝试检测到的编码
+                    if encoding:
+                        try:
+                            decoded = data.decode(encoding)
+                            if encoding.lower() != 'utf-8':
+                                # 转换为UTF-8确保一致性
+                                decoded = decoded.encode('utf-8', errors='ignore').decode('utf-8')
+                            return decoded
+                        except UnicodeDecodeError:
+                            pass
+                    
+                    # 保底方案：尝试常见编码
+                    for enc in ['utf-8', 'gb18030', 'gbk', 'big5']:
+                        try:
+                            decoded = data.decode(enc)
+                            if enc != 'utf-8':
+                                decoded = decoded.encode('utf-8', errors='ignore').decode('utf-8')
+                            return decoded
+                        except UnicodeDecodeError:
+                            continue
+                    
+                    # 最终方案：损失性解码
+                    return data.decode('utf-8', errors='ignore')
                 else:
                     error_msg = await resp.text() or "Unknown error"
                     return f"获取容器日志失败：{resp.status} {error_msg}"
