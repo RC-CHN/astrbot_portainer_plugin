@@ -63,7 +63,9 @@ class MyPlugin(Star):
             }
             headers = {"Authorization": f"Bearer {token}"}
             
-            async with self.session.get(url, headers=headers, params=params, ssl=self.verify_ssl) as resp:
+            # 合并session默认headers和请求特定headers
+            merged_headers = {**self.session.headers, **headers}
+            async with self.session.get(url, headers=merged_headers, params=params, ssl=self.verify_ssl) as resp:
                 if resp.status == 200:
                     return await resp.text()
                 else:
@@ -78,7 +80,7 @@ class MyPlugin(Star):
         await self.session.close()
 
     async def _portainer_login(self):
-        """登录Portainer获取JWT Token"""
+        """登录Portainer获取JWT Token和CSRF Token"""
         url = f"{self.portainer_url}/api/auth"
         data = {"Username": self.username, "Password": self.password}
         async with self.session.post(url, json=data, ssl=self.verify_ssl) as response:
@@ -87,6 +89,10 @@ class MyPlugin(Star):
                 token = json_data.get("jwt")
                 if not token:
                     raise Exception("登录Portainer失败：未返回JWT令牌")
+                # 从响应头获取CSRF token并添加到session头
+                csrf_token = response.headers.get('X-CSRF-TOKEN')
+                if csrf_token:
+                    self.session.headers.update({'X-CSRF-TOKEN': csrf_token})
                 return token
             else:
                 text = await response.text()
@@ -99,8 +105,10 @@ class MyPlugin(Star):
             self._token = await self._portainer_login()
             self._token_time = time.time()
             self._endpoint_id = None  # 清除之前缓存的环境ID
+            headers = {"Authorization": f"Bearer {self._token}"}
+            merged_headers = {**self.session.headers, **headers}
             async with self.session.get(f"{self.portainer_url}/api/endpoints",
-                             headers={"Authorization": f"Bearer {self._token}"}, 
+                             headers=merged_headers, 
                              ssl=self.verify_ssl) as resp:
                 if resp.status == 200:
                     endpoints = await resp.json()
@@ -138,8 +146,10 @@ class MyPlugin(Star):
             token = await self._get_portainer_token()
             endpoint = endpoint_id if endpoint_id else self._get_endpoint_id()
             url = f"{self.portainer_url}/api/endpoints/{endpoint}/docker/containers/json?all=true"
+            headers = {"Authorization": f"Bearer {token}"}
+            merged_headers = {**self.session.headers, **headers}
             async with self.session.get(url, 
-                              headers={"Authorization": f"Bearer {token}"}, 
+                              headers=merged_headers, 
                               ssl=self.verify_ssl) as resp:
                 if resp.status != 200:
                     return f"获取容器列表失败：{resp.status}"
@@ -185,7 +195,9 @@ class MyPlugin(Star):
             endpoint = endpoint_id if endpoint_id else self._get_endpoint_id()
             url = f"{self.portainer_url}/api/endpoints/{endpoint}/docker/containers/{container}/start"
             
-            async with self.session.post(url, headers={"Authorization": f"Bearer {token}"}, ssl=self.verify_ssl) as resp:
+            headers = {"Authorization": f"Bearer {token}"}
+            merged_headers = {**self.session.headers, **headers}
+            async with self.session.post(url, headers=merged_headers, ssl=self.verify_ssl) as resp:
                 if resp.status == 204:
                     return f"容器 {container} 已启动"
                 elif resp.status == 304:
@@ -214,8 +226,10 @@ class MyPlugin(Star):
             
             # 先获取容器状态
             status_url = f"{self.portainer_url}/api/endpoints/{endpoint}/docker/containers/{container}/json"
+            headers = {"Authorization": f"Bearer {token}"}
+            merged_headers = {**self.session.headers, **headers}
             async with self.session.get(status_url, 
-                                   headers={"Authorization": f"Bearer {token}"},
+                                   headers=merged_headers,
                                    ssl=self.verify_ssl) as status_resp:
                 if status_resp.status != 200:
                     return f"获取容器状态失败：{status_resp.status}"
@@ -226,8 +240,10 @@ class MyPlugin(Star):
             
             # 停止容器
             stop_url = f"{self.portainer_url}/api/endpoints/{endpoint}/docker/containers/{container}/stop"
+            headers = {"Authorization": f"Bearer {token}"}
+            merged_headers = {**self.session.headers, **headers}
             async with self.session.post(stop_url, 
-                             headers={"Authorization": f"Bearer {token}"},
+                             headers=merged_headers,
                              ssl=self.verify_ssl) as resp:
                 if resp.status == 204:
                     return f"容器 {container} 已停止"
@@ -262,7 +278,9 @@ class MyPlugin(Star):
                 img, tag = image_name, "latest"
                 
             url = f"{self.portainer_url}/api/endpoints/{endpoint}/docker/images/create?fromImage={img}&tag={tag}"
-            async with self.session.post(url, headers={"Authorization": f"Bearer {token}"}, ssl=self.verify_ssl) as resp:
+            headers = {"Authorization": f"Bearer {token}"}
+            merged_headers = {**self.session.headers, **headers}
+            async with self.session.post(url, headers=merged_headers, ssl=self.verify_ssl) as resp:
                 if resp.status == 200:
                     text = (await resp.text()).strip()
                     if not text:
@@ -302,8 +320,10 @@ class MyPlugin(Star):
         try:
             token = await self._get_portainer_token()
             url = f"{self.portainer_url}/api/endpoints"
+            headers = {"Authorization": f"Bearer {token}"}
+            merged_headers = {**self.session.headers, **headers}
             async with self.session.get(url,
-                             headers={"Authorization": f"Bearer {token}"},
+                             headers=merged_headers,
                              ssl=self.verify_ssl) as resp:
                 if resp.status != 200:
                     return f"获取节点列表失败：{resp.status}"
