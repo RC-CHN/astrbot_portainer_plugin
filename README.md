@@ -36,6 +36,14 @@ portainer:
 ### 直接命令
 - `portainer_test` - 测试Portainer连接
 
+## 使用范例
+![image](https://github.com/user-attachments/assets/0949dcb9-b101-41f7-93bf-36d79e8970f4)
+![NQU8KK K6FFS_XALS 2I6D6](https://github.com/user-attachments/assets/5518905d-07db-4950-a857-5a16b98e6e91)
+![)PJEM_GY)FVN7DK R``E )1](https://github.com/user-attachments/assets/a24233cf-10f3-4fe0-9bf6-f817de005a5a)
+![T LGM930(LD{(ICM2GPDQ)T](https://github.com/user-attachments/assets/5dc567b1-984c-411c-8745-0201d81c0d01)
+![A@17540@RTG9IB~BQ)9UOO4](https://github.com/user-attachments/assets/7da4fa46-74c5-4bf5-943e-901c08003e61)
+![Q GZT9 X4FO`EVYO8AI_1UA](https://github.com/user-attachments/assets/ad951e12-b355-4d9c-894f-31b581b87e6e)
+
 
 ## 版本信息
 - 当前版本: 0.9
