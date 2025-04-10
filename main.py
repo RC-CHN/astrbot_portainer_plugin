@@ -61,11 +61,8 @@ class MyPlugin(Star):
                 "stderr": 1,
                 "tail": tail
             }
-            headers = {"Authorization": f"Bearer {token}"}
             
-            # 合并session默认headers和请求特定headers
-            merged_headers = {**self.session.headers, **headers}
-            async with self.session.get(url, headers=merged_headers, params=params, ssl=self.verify_ssl) as resp:
+            async with self.session.get(url, params=params, ssl=self.verify_ssl) as resp:
                 if resp.status == 200:
                     return await resp.text()
                 else:
@@ -83,16 +80,27 @@ class MyPlugin(Star):
         """登录Portainer获取JWT Token和CSRF Token"""
         url = f"{self.portainer_url}/api/auth"
         data = {"Username": self.username, "Password": self.password}
+        
+        # 确保session headers是干净的
+        self.session.headers.clear()
+        
         async with self.session.post(url, json=data, ssl=self.verify_ssl) as response:
             if response.status == 200:
                 json_data = await response.json()
                 token = json_data.get("jwt")
                 if not token:
                     raise Exception("登录Portainer失败：未返回JWT令牌")
+                
                 # 从响应头获取CSRF token并添加到session头
                 csrf_token = response.headers.get('X-CSRF-TOKEN')
-                if csrf_token:
-                    self.session.headers.update({'X-CSRF-TOKEN': csrf_token})
+                if not csrf_token:
+                    raise Exception("登录Portainer失败：未返回CSRF令牌")
+                
+                # 更新session headers
+                self.session.headers.update({
+                    'X-CSRF-TOKEN': csrf_token,
+                    'Authorization': f"Bearer {token}"
+                })
                 return token
             else:
                 text = await response.text()
@@ -102,14 +110,16 @@ class MyPlugin(Star):
         """获取有效的JWT Token（缓存未过期则直接返回，否则重新登录）"""
         if (self._token is None or 
             time.time() - self._token_time > self.token_cache_ttl):
+            # 强制重新登录获取最新token和CSRF token
             self._token = await self._portainer_login()
             self._token_time = time.time()
             self._endpoint_id = None  # 清除之前缓存的环境ID
-            headers = {"Authorization": f"Bearer {self._token}"}
-            merged_headers = {**self.session.headers, **headers}
-            async with self.session.get(f"{self.portainer_url}/api/endpoints",
-                             headers=merged_headers, 
-                             ssl=self.verify_ssl) as resp:
+            
+            # 获取端点列表验证token有效性
+            async with self.session.get(
+                f"{self.portainer_url}/api/endpoints",
+                ssl=self.verify_ssl
+            ) as resp:
                 if resp.status == 200:
                     endpoints = await resp.json()
                     if not endpoints:
@@ -146,11 +156,8 @@ class MyPlugin(Star):
             token = await self._get_portainer_token()
             endpoint = endpoint_id if endpoint_id else self._get_endpoint_id()
             url = f"{self.portainer_url}/api/endpoints/{endpoint}/docker/containers/json?all=true"
-            headers = {"Authorization": f"Bearer {token}"}
-            merged_headers = {**self.session.headers, **headers}
-            async with self.session.get(url, 
-                              headers=merged_headers, 
-                              ssl=self.verify_ssl) as resp:
+            
+            async with self.session.get(url, ssl=self.verify_ssl) as resp:
                 if resp.status != 200:
                     return f"获取容器列表失败：{resp.status}"
                 
@@ -195,9 +202,7 @@ class MyPlugin(Star):
             endpoint = endpoint_id if endpoint_id else self._get_endpoint_id()
             url = f"{self.portainer_url}/api/endpoints/{endpoint}/docker/containers/{container}/start"
             
-            headers = {"Authorization": f"Bearer {token}"}
-            merged_headers = {**self.session.headers, **headers}
-            async with self.session.post(url, headers=merged_headers, ssl=self.verify_ssl) as resp:
+            async with self.session.post(url, ssl=self.verify_ssl) as resp:
                 if resp.status == 204:
                     return f"容器 {container} 已启动"
                 elif resp.status == 304:
@@ -226,11 +231,7 @@ class MyPlugin(Star):
             
             # 先获取容器状态
             status_url = f"{self.portainer_url}/api/endpoints/{endpoint}/docker/containers/{container}/json"
-            headers = {"Authorization": f"Bearer {token}"}
-            merged_headers = {**self.session.headers, **headers}
-            async with self.session.get(status_url, 
-                                   headers=merged_headers,
-                                   ssl=self.verify_ssl) as status_resp:
+            async with self.session.get(status_url, ssl=self.verify_ssl) as status_resp:
                 if status_resp.status != 200:
                     return f"获取容器状态失败：{status_resp.status}"
                     
@@ -240,11 +241,7 @@ class MyPlugin(Star):
             
             # 停止容器
             stop_url = f"{self.portainer_url}/api/endpoints/{endpoint}/docker/containers/{container}/stop"
-            headers = {"Authorization": f"Bearer {token}"}
-            merged_headers = {**self.session.headers, **headers}
-            async with self.session.post(stop_url, 
-                             headers=merged_headers,
-                             ssl=self.verify_ssl) as resp:
+            async with self.session.post(stop_url, ssl=self.verify_ssl) as resp:
                 if resp.status == 204:
                     return f"容器 {container} 已停止"
                 elif resp.status == 304:
@@ -278,9 +275,8 @@ class MyPlugin(Star):
                 img, tag = image_name, "latest"
                 
             url = f"{self.portainer_url}/api/endpoints/{endpoint}/docker/images/create?fromImage={img}&tag={tag}"
-            headers = {"Authorization": f"Bearer {token}"}
-            merged_headers = {**self.session.headers, **headers}
-            async with self.session.post(url, headers=merged_headers, ssl=self.verify_ssl) as resp:
+            
+            async with self.session.post(url, ssl=self.verify_ssl) as resp:
                 if resp.status == 200:
                     text = (await resp.text()).strip()
                     if not text:
@@ -320,11 +316,8 @@ class MyPlugin(Star):
         try:
             token = await self._get_portainer_token()
             url = f"{self.portainer_url}/api/endpoints"
-            headers = {"Authorization": f"Bearer {token}"}
-            merged_headers = {**self.session.headers, **headers}
-            async with self.session.get(url,
-                             headers=merged_headers,
-                             ssl=self.verify_ssl) as resp:
+            
+            async with self.session.get(url, ssl=self.verify_ssl) as resp:
                 if resp.status != 200:
                     return f"获取节点列表失败：{resp.status}"
                     
