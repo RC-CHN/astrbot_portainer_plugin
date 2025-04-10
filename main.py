@@ -11,7 +11,14 @@ class MyPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
-        self.session = aiohttp.ClientSession()
+        portainer_config = config.get("portainer", {})
+        self.session = aiohttp.ClientSession(
+            trust_env=True,
+            headers={
+                'Referer': portainer_config.get("url", ""),
+                'Origin': portainer_config.get("url", "")
+            }
+        )
         # Portainer配置初始化
         portainer_config = config.get("portainer", {})
         self.portainer_url = portainer_config.get("url", "")
@@ -76,13 +83,28 @@ class MyPlugin(Star):
         '''可选择实现 terminate 函数，当插件被卸载/停用时会调用。'''
         await self.session.close()
 
+    async def _get_csrf_token(self):
+        """从/settings端点获取CSRF令牌"""
+        url = f"{self.portainer_url}/api/settings"
+        async with self.session.get(url, ssl=self.verify_ssl) as resp:
+            return resp.headers.get('X-Csrf-Token', '')
+
     async def _portainer_login(self):
         """登录Portainer获取JWT Token和CSRF Token"""
         url = f"{self.portainer_url}/api/auth"
         data = {"Username": self.username, "Password": self.password}
         
-        # 确保session headers是干净的
+        # 确保session headers是干净的但保留必要headers
         self.session.headers.clear()
+        self.session.headers.update({
+            'Referer': self.portainer_url,
+            'Origin': self.portainer_url
+        })
+        
+        # 先获取CSRF令牌
+        csrf_token = await self._get_csrf_token()
+        if csrf_token:
+            self.session.headers.update({'X-Csrf-Token': csrf_token})
         
         async with self.session.post(url, json=data, ssl=self.verify_ssl) as response:
             if response.status == 200:
@@ -91,15 +113,15 @@ class MyPlugin(Star):
                 if not token:
                     raise Exception("登录Portainer失败：未返回JWT令牌")
                 
-                # 从响应头获取CSRF token并添加到session头
-                csrf_token = response.headers.get('X-CSRF-TOKEN')
+                # 更新CSRF令牌
+                csrf_token = response.headers.get('X-CSRF-TOKEN', '') or await self._get_csrf_token()
                 if not csrf_token:
-                    raise Exception("登录Portainer失败：未返回CSRF令牌")
+                    raise Exception("登录Portainer失败：未获取到CSRF令牌")
                 
                 # 更新session headers
                 self.session.headers.update({
-                    'X-CSRF-TOKEN': csrf_token,
-                    'Authorization': f"Bearer {token}"
+                    'Authorization': f"Bearer {token}",
+                    'X-CSRF-TOKEN': csrf_token
                 })
                 return token
             else:

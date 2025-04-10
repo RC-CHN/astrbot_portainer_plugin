@@ -9,13 +9,25 @@ class PortainerClient:
         self.password = password
         self.verify_ssl = verify_ssl
         self.token_cache_ttl = token_cache_ttl
-        self.session = aiohttp.ClientSession()
+        self.session = aiohttp.ClientSession(
+            trust_env=True,  # 从环境变量获取代理设置
+            headers={
+                'Referer': portainer_url,  # 防止CSRF保护
+                'Origin': portainer_url    # 跨域相关
+            }
+        )
         self._token = None
         self._token_time = 0
         self._endpoint_id = None
 
     async def close(self):
         await self.session.close()
+
+    async def _get_csrf_token(self):
+        """从/settings端点获取CSRF令牌"""
+        url = f"{self.portainer_url}/api/settings"
+        async with self.session.get(url, ssl=self.verify_ssl) as resp:
+            return resp.headers.get('X-Csrf-Token', '')
 
     async def _portainer_login(self):
         """登录Portainer获取JWT Token和CSRF Token"""
@@ -24,6 +36,11 @@ class PortainerClient:
         
         # 确保session headers是干净的
         self.session.headers.clear()
+        
+        # 先获取CSRF令牌
+        csrf_token = await self._get_csrf_token()
+        if csrf_token:
+            self.session.headers.update({'X-Csrf-Token': csrf_token})
         
         print(f"\n[DEBUG] 登录请求URL: {url}")
         print(f"[DEBUG] 登录请求Headers: {dict(self.session.headers)}")
@@ -37,8 +54,8 @@ class PortainerClient:
                 if not token:
                     raise Exception("登录Portainer失败：未返回JWT令牌")
                 
-                # 尝试获取CSRF token，但不强制要求
-                csrf_token = response.headers.get('X-CSRF-TOKEN', '')
+                # 更新CSRF令牌
+                csrf_token = response.headers.get('X-CSRF-TOKEN', '') or await self._get_csrf_token()
                 
                 # 更新session headers
                 headers = {
@@ -48,6 +65,9 @@ class PortainerClient:
                     headers['X-CSRF-TOKEN'] = csrf_token
                 
                 self.session.headers.update(headers)
+                
+                # 确保Cookie被更新
+                self.session.cookie_jar.update_cookies(response.cookies, response.url)
                 return token
             else:
                 text = await response.text()
@@ -175,3 +195,51 @@ class PortainerClient:
                 
         except Exception as e:
             return f"拉取镜像出错: {str(e)}"
+
+    async def start_container(self, container_id, endpoint_id=None):
+        '''启动指定容器'''
+        try:
+            await self._get_portainer_token()
+            endpoint = endpoint_id if endpoint_id else await self._get_endpoint_id()
+            url = f"{self.portainer_url}/api/endpoints/{endpoint}/docker/containers/{container_id}/start"
+            
+            print(f"\n[DEBUG] 启动容器请求URL: {url}")
+            print(f"[DEBUG] 请求Headers: {dict(self.session.headers)}")
+            
+            async with self.session.post(url, ssl=self.verify_ssl) as resp:
+                print(f"[DEBUG] 响应状态: {resp.status}")
+                print(f"[DEBUG] 响应Headers: {dict(resp.headers)}")
+                if resp.status == 204:
+                    return f"容器 {container_id} 启动成功"
+                elif resp.status == 304:
+                    return f"容器 {container_id} 已在运行状态"
+                else:
+                    text = await resp.text()
+                    raise Exception(f"启动容器失败：{resp.status} {text}")
+                
+        except Exception as e:
+            return f"启动容器出错: {str(e)}"
+
+    async def stop_container(self, container_id, endpoint_id=None):
+        '''停止指定容器'''
+        try:
+            await self._get_portainer_token()
+            endpoint = endpoint_id if endpoint_id else await self._get_endpoint_id()
+            url = f"{self.portainer_url}/api/endpoints/{endpoint}/docker/containers/{container_id}/stop"
+            
+            print(f"\n[DEBUG] 停止容器请求URL: {url}")
+            print(f"[DEBUG] 请求Headers: {dict(self.session.headers)}")
+            
+            async with self.session.post(url, ssl=self.verify_ssl) as resp:
+                print(f"[DEBUG] 响应状态: {resp.status}")
+                print(f"[DEBUG] 响应Headers: {dict(resp.headers)}")
+                if resp.status == 204:
+                    return f"容器 {container_id} 停止成功"
+                elif resp.status == 304:
+                    return f"容器 {container_id} 已停止"
+                else:
+                    text = await resp.text()
+                    raise Exception(f"停止容器失败：{resp.status} {text}")
+                
+        except Exception as e:
+            return f"停止容器出错: {str(e)}"
